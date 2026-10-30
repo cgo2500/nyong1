@@ -8,12 +8,13 @@ Rules
   fees ("be"), or at a fixed number of points (--tp 1000).
 - If TP and SL are both inside the same candle, SL is assumed to fill first.
 
-Candles are fetched from the OKX public API, or read from a CSV
+Candles are fetched from the OKX (default) or Gate public API, or read from a CSV
 (--candles, columns: time,open,high,low,close; time in unix s/ms or ISO UTC).
 
 Usage
   python3 atropos/backtest.py
   python3 atropos/backtest.py --tp 1000
+  python3 atropos/backtest.py --source gate
   python3 atropos/backtest.py --candles okx_btc_5m.csv
 """
 import argparse
@@ -78,6 +79,24 @@ def fetch_okx(start_ms, end_ms, inst="BTC-USDT-SWAP"):
         after = min(int(c[0]) for c in data)
         if after <= start_ms:
             break
+        time.sleep(0.12)
+    return candles
+
+
+def fetch_gate(start_ms, end_ms, contract="BTC_USDT"):
+    """Gate USDT-perp candles in windows of at most 2000 bars."""
+    candles = {}
+    step = 1999 * BAR_MS // 1000
+    frm = start_ms // 1000
+    while frm <= end_ms // 1000:
+        to = min(frm + step, end_ms // 1000)
+        url = ("https://api.gateio.ws/api/v4/futures/usdt/candlesticks"
+               f"?contract={contract}&interval=5m&from={frm}&to={to}")
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            for c in json.load(r):
+                candles[int(c["t"]) * 1000] = tuple(float(c[k]) for k in ("o", "h", "l", "c"))
+        frm = to + BAR_MS // 1000
         time.sleep(0.12)
     return candles
 
@@ -152,8 +171,9 @@ def report(results):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--signals", default=os.path.join(HERE, "signals.csv"))
-    ap.add_argument("--candles", help="CSV of 5m candles instead of the OKX API")
-    ap.add_argument("--save", default=os.path.join(HERE, "okx_btc_5m.csv"))
+    ap.add_argument("--candles", help="CSV of 5m candles instead of an exchange API")
+    ap.add_argument("--source", choices=["okx", "gate"], default="okx")
+    ap.add_argument("--save", help="where to save fetched candles (default <source>_btc_5m.csv)")
     ap.add_argument("--tz", type=float, default=9, help="UTC offset of signal times")
     ap.add_argument("--qty", type=float, default=0.1)
     ap.add_argument("--sl", type=float, default=1000)
@@ -168,8 +188,9 @@ def main():
         candles = load_candles_csv(a.candles)
     else:
         end = min(signals[-1]["ts"] + a.max_bars * BAR_MS, int(time.time() * 1000))
-        candles = fetch_okx(signals[0]["ts"] - BAR_MS, end)
-        with open(a.save, "w", newline="") as f:
+        fetch = fetch_gate if a.source == "gate" else fetch_okx
+        candles = fetch(signals[0]["ts"] - BAR_MS, end)
+        with open(a.save or os.path.join(HERE, f"{a.source}_btc_5m.csv"), "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["time", "open", "high", "low", "close"])
             for t in sorted(candles):
