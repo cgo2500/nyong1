@@ -1,2 +1,4 @@
 __pycache__/
 *_btc_5m.csv
+*.session
+*.session-journal
