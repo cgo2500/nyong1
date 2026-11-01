@@ -1,4 +1,4 @@
-time_kst,side,note,msg_kst,sources
-2026-10-30 05:45,long,,2026-10-30 05:51:10,webhook
-2026-10-30 08:45,long,,2026-10-30 08:50:16,webhook
-2026-10-30 09:15,long,,2026-10-30 09:20:45,webhook
+time_kst,side,note,msg_kst,sources,price
+2026-10-30 05:45,long,,2026-10-30 05:51:10,webhook,78947.6
+2026-10-30 08:45,long,,2026-10-30 08:50:16,webhook,78160
+2026-10-30 09:15,long,,2026-10-30 09:20:45,webhook,77397.2
