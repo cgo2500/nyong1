@@ -22,7 +22,7 @@ import os
 
 import numpy as np
 
-from backtest import BAR_MS, HERE, load_candles_csv, load_signals
+from backtest import BAR_MS, HERE, SIGNAL_FILES, load_candles_csv, load_signals
 
 QTY = 0.1
 MAKER, TAKER = 0.0002, 0.0005
@@ -193,7 +193,7 @@ def trail_table(total, sl, tp1, frac):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--signals", default=os.path.join(HERE, "signals.csv"))
+    ap.add_argument("--signals", nargs="+", default=SIGNAL_FILES)
     ap.add_argument("--candles", required=True)
     ap.add_argument("--tz", type=float, default=9)
     ap.add_argument("--max-bars", type=int, default=288 * 7)

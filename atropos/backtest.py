@@ -42,15 +42,24 @@ def parse_time(s):
     return int(dt.timestamp() * 1000)
 
 
-def load_signals(path, tz_hours):
+SIGNAL_FILES = [os.path.join(HERE, "signals.csv"), os.path.join(HERE, "server_signals.csv")]
+
+
+def load_signals(paths, tz_hours):
+    """Signals from one or more CSVs; a signal listed in several files counts once."""
     tz = timezone(timedelta(hours=tz_hours))
-    out = []
-    with open(path, encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            dt = datetime.strptime(row["time_kst"], "%Y-%m-%d %H:%M").replace(tzinfo=tz)
-            out.append({"label": row["time_kst"], "ts": int(dt.timestamp() * 1000),
-                        "side": row["side"].strip().lower(), "note": row.get("note", "")})
-    return sorted(out, key=lambda s: s["ts"])
+    out = {}
+    for path in [paths] if isinstance(paths, str) else paths:
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                dt = datetime.strptime(row["time_kst"], "%Y-%m-%d %H:%M").replace(tzinfo=tz)
+                side = row["side"].strip().lower()
+                out.setdefault((row["time_kst"], side), {
+                    "label": row["time_kst"], "ts": int(dt.timestamp() * 1000),
+                    "side": side, "note": row.get("note", "")})
+    return sorted(out.values(), key=lambda s: s["ts"])
 
 
 def load_candles_csv(path):
@@ -170,7 +179,8 @@ def report(results):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--signals", default=os.path.join(HERE, "signals.csv"))
+    ap.add_argument("--signals", nargs="+", default=SIGNAL_FILES,
+                    help="signal CSVs (default: screenshot list + server sync)")
     ap.add_argument("--candles", help="CSV of 5m candles instead of an exchange API")
     ap.add_argument("--source", choices=["okx", "gate"], default="okx")
     ap.add_argument("--save", help="where to save fetched candles (default <source>_btc_5m.csv)")
