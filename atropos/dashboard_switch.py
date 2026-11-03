@@ -1,7 +1,7 @@
-"""Rows for the dashboard's '비트 아트로포스' tab: safe preset + position policies.
+"""Rows for the dashboard's '비트 아트로포스' tab: position policies on the presets.
 
-Both rules use the safe (conservative) exits, and an opposite signal closes
-everything at that candle's close and opens the new side.
+Each rule takes the safe (conservative) or aggressive exits, and an opposite
+signal closes everything at that candle's close and opens the new side.
   switch   one position at a time; a same-side signal while holding is ignored
   pyramid  a same-side signal adds another 10000 USDT position
 Rows use the tab's btc_atro schema, with net scaled to 10000 USDT of BTC per
@@ -21,15 +21,19 @@ import switch
 from backtest import SIGNAL_FILES, load_candles_csv, load_signals
 from telegram_collector import KST
 
-PARAMS = grid.PRESETS["conservative"]
 NOTIONAL = 10000
+SWITCH_TEXT = "포지션 1개 · 반대 신호가 오면 전량 청산 후 반대 진입 · 같은 방향 신호는 무시"
+PYRAMID_TEXT = "같은 방향 신호마다 10000 USDT 추가 진입 · 반대 신호가 오면 전량 청산 후 반대 진입"
+# rule id: (preset, policy, label, text)
 RULES = {
-    "switch": ("안전형 + 스위칭",
-               "10000 USDT · 안전형과 같은 손절·익절·트레일 · 포지션 1개 · "
-               "반대 신호가 오면 전량 청산 후 반대 진입 · 같은 방향 신호는 무시"),
-    "pyramid": ("안전형 + 스위칭 + 추가진입",
-                "10000 USDT · 안전형과 같은 손절·익절·트레일 · 같은 방향 신호마다 "
-                "10000 USDT 추가 진입 · 반대 신호가 오면 전량 청산 후 반대 진입"),
+    "switch": ("conservative", "switch", "안전형 + 스위칭",
+               f"10000 USDT · 안전형과 같은 손절·익절·트레일 · {SWITCH_TEXT}"),
+    "pyramid": ("conservative", "pyramid", "안전형 + 스위칭 + 추가진입",
+                f"10000 USDT · 안전형과 같은 손절·익절·트레일 · {PYRAMID_TEXT}"),
+    "aggr_switch": ("aggressive", "switch", "공격형 + 스위칭",
+                    f"10000 USDT · 공격형과 같은 손절·익절·트레일 · {SWITCH_TEXT}"),
+    "aggr_pyramid": ("aggressive", "pyramid", "공격형 + 스위칭 + 추가진입",
+                     f"10000 USDT · 공격형과 같은 손절·익절·트레일 · {PYRAMID_TEXT}"),
 }
 
 
@@ -37,10 +41,10 @@ def kst(ms):
     return datetime.fromtimestamp(ms / 1000, KST).strftime("%Y-%m-%dT%H:%M")
 
 
-def rows_for(rule, trades, times, max_bars):
+def rows_for(rule, params, policy, trades, times, max_bars):
     out = []
-    for tr, net_qty, how in switch.run(trades, PARAMS, rule)[0]:
-        legs = grid.legs(tr, *PARAMS)
+    for tr, net_qty, how in switch.run(trades, params, policy)[0]:
+        legs = grid.legs(tr, *params)
         tp1_hit = legs[0][3] == grid.MAKER
         end = max(b for _, b, _, _ in legs)
         if how == "switched":
@@ -79,10 +83,11 @@ def main():
     sigs = [s for s in load_signals(a.signals, 9) if s["ts"] in idx]
     trades = [grid.Trade(s, candles, times, idx, a.max_bars) for s in sigs]
     rows, status = [], []
-    for rule, (label, text) in RULES.items():
-        rows += rows_for(rule, trades, times, a.max_bars)
+    for rule, (preset, policy, label, text) in RULES.items():
+        params = grid.PRESETS[preset]
+        rows += rows_for(rule, params, policy, trades, times, a.max_bars)
         status.append({"rule": rule, "label": label, "text": text, "signals": len(trades),
-                       "max_open": switch.run(trades, PARAMS, rule)[1],
+                       "max_open": switch.run(trades, params, policy)[1],
                        "first_signal": trades[0].label.replace(" ", "T") if trades else "",
                        "asof": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")})
     for name, data in (("btc_atro_sw.json", rows), ("btc_atro_sw_status.json", status)):
