@@ -33,6 +33,12 @@ TP2S = range(800, 6001, 400)
 FRACS = (0.2, 0.3, 0.5, 0.7)
 ACTS = range(400, 4001, 200)
 DISTS = range(400, 2401, 200)
+BE_ATS = (None, *range(300, 2501, 100))
+PRESETS = {
+    "SL/TP 1000": (1000, 1000, 1.0, "fixed", 1200, None),
+    "conservative": (1200, 2200, 0.3, "trail", 2200, 400),
+    "aggressive": (2400, 2600, 0.7, "trail", 2600, 400),
+}
 
 
 class Trade:
@@ -94,36 +100,39 @@ def leg(tr, qty, exit_pts, rate):
     return exit_pts * qty - exit_px * qty * rate - tr.entry * qty * TAKER
 
 
-def simulate(tr, sl, tp1, frac, mode, p2, p3=None):
-    """Net PnL of one trade. mode fixed/be: p2 = TP2; mode trail: p2 = act, p3 = dist."""
+def simulate(tr, sl, tp1, frac, mode, p2, p3=None, be_at=None):
+    """Net PnL of one trade. mode fixed/be: p2 = TP2; mode trail: p2 = act, p3 = dist.
+
+    be_at: once price is this many points in favor, the stop for the whole
+    position moves to the fee break-even.
+    """
     q1, q2 = QTY * frac, QTY * (1 - frac)
-    t_sl = tr.first_adv(sl)
+    t_stop, stop_pts = tr.first_adv(sl), -sl
+    if be_at is not None:
+        t_arm = tr.first_fav(be_at)
+        if t_arm < t_stop:
+            t_stop, stop_pts = tr.be_hit(t_arm), tr.be
     t_tp1 = tr.first_fav(tp1)
 
-    if t_tp1 < t_sl:
+    if t_tp1 < t_stop:
         pnl = leg(tr, q1, tp1, MAKER)
-    elif t_sl < tr.n:
-        pnl = leg(tr, q1, -sl, TAKER)
+    elif t_stop < tr.n:
+        pnl = leg(tr, q1, stop_pts, TAKER)
     else:
         pnl = leg(tr, q1, tr.last, TAKER)
 
+    if mode == "be" and t_tp1 < t_stop:
+        t_be = tr.be_hit(t_tp1)
+        if t_be < t_stop or stop_pts < tr.be:
+            t_stop, stop_pts = min(t_be, t_stop), tr.be
     if mode == "trail":
-        t_act = tr.first_fav(p2)
-        if t_act < t_sl:
-            t_ex, pts = tr.trail(p2, p3)
-            pts = max(pts, -sl)
-            return pnl + leg(tr, q2, pts, TAKER)
-    else:
-        t_tp2 = tr.first_fav(p2)
-        t_stop, stop_pts = t_sl, -sl
-        if mode == "be" and t_tp1 < t_sl:
-            t_be = tr.be_hit(t_tp1)
-            if t_be < t_stop:
-                t_stop, stop_pts = t_be, tr.be
-        if t_tp2 < t_stop:
-            return pnl + leg(tr, q2, p2, MAKER)
-    if t_sl < tr.n:
-        return pnl + leg(tr, q2, -sl, TAKER)
+        if tr.first_fav(p2) < t_stop:
+            _, pts = tr.trail(p2, p3)
+            return pnl + leg(tr, q2, max(pts, stop_pts), TAKER)
+    elif tr.first_fav(p2) < t_stop:
+        return pnl + leg(tr, q2, p2, MAKER)
+    if t_stop < tr.n:
+        return pnl + leg(tr, q2, stop_pts, TAKER)
     return pnl + leg(tr, q2, tr.last, TAKER)
 
 
@@ -191,6 +200,18 @@ def trail_table(total, sl, tp1, frac):
             print(f"{act:>8}" + "".join(f"{v:>7.0f}" if v is not None else f"{'':>7}" for v in row))
 
 
+def be_table(trades, configs):
+    """Total PnL when the stop moves to break-even once price is +X in favor."""
+    print("\n== break-even stop after +X points (total net / losing trades)")
+    print(f"{'+X':>6}" + "".join(f"{name:>22}" for name in configs))
+    for x in BE_ATS:
+        cells = []
+        for p in configs.values():
+            r = np.array([simulate(tr, *p, be_at=x) for tr in trades])
+            cells.append(f"{r.sum():>14.1f} / {int((r < 0).sum()):>3}")
+        print(f"{x or 'off':>6}" + "".join(f"{c:>22}" for c in cells))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--signals", nargs="+", default=SIGNAL_FILES)
@@ -216,6 +237,7 @@ def main():
     _, total, robust = search(trades, "all signals")
     best_trail = max((q for q in robust if q[3] == "trail"), key=robust.get)
     trail_table(total, *best_trail[:3])
+    be_table(trades, {**PRESETS, "grid best": max(robust, key=robust.get)})
 
     train, test = trades[:a.train], trades[a.train:]
     _, t_total, t_robust = search(train, f"train (first {a.train})", top=3)
