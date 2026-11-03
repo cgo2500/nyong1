@@ -53,7 +53,9 @@ class Trade:
         o, h, l, c = (np.array(x) for x in zip(*path))
         self.fav = (h - self.entry) if sgn == 1 else (self.entry - l)
         self.adv = (self.entry - l) if sgn == 1 else (h - self.entry)
-        self.last = sgn * (c[-1] - self.entry)
+        self.close = sgn * (c - self.entry)
+        self.last = self.close[-1]
+        self.i = i
         self.n = len(path)
         self.cumfav = np.maximum.accumulate(self.fav)
         self.cumadv = np.maximum.accumulate(self.adv)
@@ -100,9 +102,10 @@ def leg(tr, qty, exit_pts, rate):
     return exit_pts * qty - exit_px * qty * rate - tr.entry * qty * TAKER
 
 
-def simulate(tr, sl, tp1, frac, mode, p2, p3=None, be_at=None):
-    """Net PnL of one trade. mode fixed/be: p2 = TP2; mode trail: p2 = act, p3 = dist.
+def legs(tr, sl, tp1, frac, mode, p2, p3=None, be_at=None):
+    """Exits of the two legs as (qty, bar, points, fee rate); bar == tr.n means still open.
 
+    mode fixed/be: p2 = TP2; mode trail: p2 = act, p3 = dist.
     be_at: once price is this many points in favor, the stop for the whole
     position moves to the fee break-even.
     """
@@ -115,11 +118,11 @@ def simulate(tr, sl, tp1, frac, mode, p2, p3=None, be_at=None):
     t_tp1 = tr.first_fav(tp1)
 
     if t_tp1 < t_stop:
-        pnl = leg(tr, q1, tp1, MAKER)
+        out = [(q1, t_tp1, tp1, MAKER)]
     elif t_stop < tr.n:
-        pnl = leg(tr, q1, stop_pts, TAKER)
+        out = [(q1, t_stop, stop_pts, TAKER)]
     else:
-        pnl = leg(tr, q1, tr.last, TAKER)
+        out = [(q1, tr.n, tr.last, TAKER)]
 
     if mode == "be" and t_tp1 < t_stop:
         t_be = tr.be_hit(t_tp1)
@@ -127,13 +130,22 @@ def simulate(tr, sl, tp1, frac, mode, p2, p3=None, be_at=None):
             t_stop, stop_pts = min(t_be, t_stop), tr.be
     if mode == "trail":
         if tr.first_fav(p2) < t_stop:
-            _, pts = tr.trail(p2, p3)
-            return pnl + leg(tr, q2, max(pts, stop_pts), TAKER)
-    elif tr.first_fav(p2) < t_stop:
-        return pnl + leg(tr, q2, p2, MAKER)
+            t_ex, pts = tr.trail(p2, p3)
+            if stop_pts > pts:
+                t_ex, pts = min(t_ex, t_stop), stop_pts
+            return out + [(q2, t_ex, pts, TAKER)]
+    else:
+        t_tp2 = tr.first_fav(p2)
+        if t_tp2 < t_stop:
+            return out + [(q2, t_tp2, p2, MAKER)]
     if t_stop < tr.n:
-        return pnl + leg(tr, q2, stop_pts, TAKER)
-    return pnl + leg(tr, q2, tr.last, TAKER)
+        return out + [(q2, t_stop, stop_pts, TAKER)]
+    return out + [(q2, tr.n, tr.last, TAKER)]
+
+
+def simulate(tr, *params, **kw):
+    """Net PnL of one trade (see legs)."""
+    return sum(leg(tr, q, pts, rate) for q, _, pts, rate in legs(tr, *params, **kw) if q)
 
 
 def combos():
