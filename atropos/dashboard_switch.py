@@ -1,7 +1,9 @@
 """Rows for the dashboard's '비트 아트로포스' tab: position policies on the presets.
 
-Each rule takes the safe (conservative) or aggressive exits, and an opposite
-signal closes everything at that candle's close and opens the new side.
+Each rule takes the safe (conservative) or aggressive exits. Except under
+hold, an opposite signal closes everything at that candle's close and opens
+the new side.
+  hold     one position at a time; every signal while holding is ignored
   switch   one position at a time; a same-side signal while holding is ignored
   pyramid  a same-side signal adds another 10000 USDT position
 Rows use the tab's btc_atro schema, with net scaled to 10000 USDT of BTC per
@@ -22,10 +24,15 @@ from backtest import SIGNAL_FILES, load_candles_csv, load_signals
 from telegram_collector import KST
 
 NOTIONAL = 10000
+HOLD_TEXT = "포지션 1개 · 들고 있는 동안 오는 신호는 반대 방향까지 모두 무시"
 SWITCH_TEXT = "포지션 1개 · 반대 신호가 오면 전량 청산 후 반대 진입 · 같은 방향 신호는 무시"
 PYRAMID_TEXT = "같은 방향 신호마다 10000 USDT 추가 진입 · 반대 신호가 오면 전량 청산 후 반대 진입"
 # rule id: (preset, policy, label, text)
 RULES = {
+    "hold": ("conservative", "hold", "안전형 + 단일진입",
+             f"10000 USDT · 안전형과 같은 손절·익절·트레일 · {HOLD_TEXT}"),
+    "aggr_hold": ("aggressive", "hold", "공격형 + 단일진입",
+                  f"10000 USDT · 공격형과 같은 손절·익절·트레일 · {HOLD_TEXT}"),
     "switch": ("conservative", "switch", "안전형 + 스위칭",
                f"10000 USDT · 안전형과 같은 손절·익절·트레일 · {SWITCH_TEXT}"),
     "pyramid": ("conservative", "pyramid", "안전형 + 스위칭 + 추가진입",
