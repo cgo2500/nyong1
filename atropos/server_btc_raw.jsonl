@@ -2,3 +2,4 @@
 {"msg_time": "2026-10-30T08:50:16+09:00", "received_at": "2026-10-30T08:50:16+09:00", "text": "아트로포스 롱 · BTC 5 · 78160", "source": "webhook", "parsed": {"pairs": [["BTC", "long"]]}}
 {"msg_time": "2026-10-30T09:20:45+09:00", "received_at": "2026-10-30T09:20:45+09:00", "text": "아트로포스 롱 · BTC 5 · 77397.2", "source": "webhook", "parsed": {"pairs": [["BTC", "long"]]}}
 {"msg_time": "2026-11-02T12:30:26+09:00", "received_at": "2026-11-02T12:30:26+09:00", "text": "아트로포스 숏 · BTC 5 · 78635.7", "source": "webhook", "parsed": {"pairs": [["BTC", "short"]]}}
+{"msg_time": "2026-11-03T09:10:14+09:00", "received_at": "2026-11-03T09:10:14+09:00", "text": "아트로포스 롱 · BTC 5 · 76677.8", "source": "webhook", "parsed": {"pairs": [["BTC", "long"]]}}
