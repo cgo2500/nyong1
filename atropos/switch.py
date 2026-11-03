@@ -1,4 +1,4 @@
-"""Backtest Atropos presets with one position at a time.
+"""Backtest Atropos presets under position policies (switching, pyramiding).
 
 Policies
   independent - every signal is its own trade (what grid.py assumes)
@@ -6,6 +6,9 @@ Policies
   switch      - one position at a time; an opposite signal while holding
                 closes everything at that candle's close (taker) and opens
                 the new side; a same-side signal is ignored
+  pyramid     - a same-side signal adds another full-size position with its
+                own TP/SL; an opposite signal closes all of them at that
+                candle's close and opens the new side
 
 Usage
   python3 atropos/switch.py --candles okx_btc_5m.csv [--qty 1]
@@ -19,28 +22,33 @@ from backtest import SIGNAL_FILES, load_candles_csv, load_signals
 
 
 def run(trades, params, policy):
-    """Returns per-trade rows: (trade, net, how it ended)."""
+    """Returns (per-trade rows (trade, net, how it ended), max positions held at once)."""
     if policy == "independent":
-        return [(t, grid.simulate(t, *params), "") for t in trades]
-    rows, pos = [], None
+        return [(t, grid.simulate(t, *params), "") for t in trades], None
+    rows, open_pos, peak = [], [], 0
     for t in trades:
-        if pos is not None:
-            ptr, plegs = pos
+        still = []
+        for ptr, plegs in open_pos:
             k = t.i - ptr.i - 1  # bar of the new signal, relative to the open trade
-            if max(b for _, b, _, _ in plegs) > k:  # still holding at this close
-                if policy == "hold" or t.side == ptr.side:
-                    continue
-                cut = [(q, b, p, r) if b <= k else (q, k, ptr.close[k], grid.TAKER)
-                       for q, b, p, r in plegs]
-                rows.append((ptr, net(ptr, cut), "switched"))
-                pos = None
+            if max(b for _, b, _, _ in plegs) > k:
+                still.append((ptr, plegs, k))
             else:
                 rows.append((ptr, net(ptr, plegs), ""))
-                pos = None
-        pos = (t, grid.legs(t, *params))
-    if pos is not None:
-        rows.append((pos[0], net(*pos), ""))
-    return rows
+        open_pos = [(ptr, plegs) for ptr, plegs, _ in still]
+        if still:
+            same = still[0][0].side == t.side
+            if policy == "hold" or (policy == "switch" and same):
+                continue
+            if not same:
+                for ptr, plegs, k in still:
+                    cut = [(q, b, p, r) if b <= k else (q, k, ptr.close[k], grid.TAKER)
+                           for q, b, p, r in plegs]
+                    rows.append((ptr, net(ptr, cut), "switched"))
+                open_pos = []
+        open_pos.append((t, grid.legs(t, *params)))
+        peak = max(peak, len(open_pos))
+    rows += [(ptr, net(ptr, plegs), "") for ptr, plegs in open_pos]
+    return rows, peak
 
 
 def net(tr, legs):
@@ -69,24 +77,26 @@ def main():
 
     print(f"{len(trades)} signals, {a.qty} BTC per trade (USDT)")
     print(f"{'preset':<14} {'policy':<12} {'trades':>6} {'switch':>6} {'losses':>6} "
-          f"{'total':>10} {'maxDD':>9}")
+          f"{'total':>10} {'maxDD':>9} {'max pos':>7}")
     detail = {}
     for name, params in grid.PRESETS.items():
-        for policy in ("independent", "hold", "switch"):
-            rows = run(trades, params, policy)
+        for policy in ("independent", "hold", "switch", "pyramid"):
+            rows, peak = run(trades, params, policy)
             pnls = [r[1] * scale for r in rows]
             print(f"{name:<14} {policy:<12} {len(rows):>6} "
                   f"{sum(r[2] == 'switched' for r in rows):>6} {sum(p < 0 for p in pnls):>6} "
-                  f"{sum(pnls):>10.0f} {max_dd(pnls):>9.0f}")
+                  f"{sum(pnls):>10.0f} {max_dd(pnls):>9.0f} {peak or '-':>7}")
             detail[name, policy] = rows
 
     for name in ("conservative", "aggressive"):
-        print(f"\n== {name}: per signal, independent vs switch")
-        sw = {r[0].label: r for r in detail[name, "switch"]}
+        print(f"\n== {name}: per signal, independent | switch | pyramid")
+        cols = [{r[0].label: r for r in detail[name, p]} for p in ("switch", "pyramid")]
         for t, pnl, _ in detail[name, "independent"]:
-            s = sw.get(t.label)
-            right = f"{s[1] * scale:>9.0f} {s[2]}" if s else f"{'skipped':>9}"
-            print(f"{t.label} {t.side:<5} {pnl * scale:>9.0f} | {right}")
+            cells = []
+            for col in cols:
+                r = col.get(t.label)
+                cells.append(f"{r[1] * scale:>7.0f} {r[2] or '':<8}" if r else f"{'skipped':>7} {'':<8}")
+            print(f"{t.label} {t.side:<5} {pnl * scale:>7.0f} | " + " | ".join(cells))
 
 
 if __name__ == "__main__":
