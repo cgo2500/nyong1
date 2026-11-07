@@ -33,12 +33,15 @@ NOTIONAL = 10000
 HOLD_TEXT = "포지션 1개 · 들고 있는 동안 오는 신호는 반대 방향까지 모두 무시"
 SWITCH_TEXT = "포지션 1개 · 반대 신호가 오면 전량 청산 후 반대 진입 · 같은 방향 신호는 무시"
 PYRAMID_TEXT = "같은 방향 신호마다 10000 USDT 추가 진입 · 반대 신호가 오면 전량 청산 후 반대 진입"
+# the exits each card spells out
+SAFE_EXITS = "SL −1,200 · TP +2,200 에서 30% 익절 · Trail 나머지 70% 최고가 −400"
+AGGR_EXITS = "SL −2,400 · TP +2,600 에서 70% 익절 · Trail 나머지 30% 최고가 −400"
+PCT_EXITS = "TP +3.2% 에서 20% 익절 · Trail 나머지 80% +4.2% 부터 최고가 −0.8%"
 # percent rules from pct_grid.py, in basis points of the entry (260 = 2.6%)
 PCT_PRESETS = {
     "pct_mid": (260, 320, 0.2, "trail", 420, 80),
     "pct_aggr": (360, 320, 0.2, "trail", 420, 80),
 }
-PCT_TEXT = "+3.2% 에서 20% 익절 · 나머지 80% 는 +4.2% 부터 최고가 −0.8% 트레일"
 # rule id: (preset, policy, label, text); the page names safe/aggr itself
 BASE_RULES = {
     "safe": ("conservative", "independent", "안전형",
@@ -47,24 +50,19 @@ BASE_RULES = {
              "10000 USDT · 손절 −2,400 · +2,600 에서 70% 익절 · 나머지 30% 최고가 −400 트레일"),
 }
 RULES = {
-    "hold": ("conservative", "hold", "안전형 + 단일진입",
-             f"10000 USDT · 안전형과 같은 손절·익절·트레일 · {HOLD_TEXT}"),
-    "aggr_hold": ("aggressive", "hold", "공격형 + 단일진입",
-                  f"10000 USDT · 공격형과 같은 손절·익절·트레일 · {HOLD_TEXT}"),
-    "switch": ("conservative", "switch", "안전형 + 스위칭 + 단일진입",
-               f"10000 USDT · 안전형과 같은 손절·익절·트레일 · {SWITCH_TEXT}"),
-    "pyramid": ("conservative", "pyramid", "안전형 + 스위칭 + 추가진입",
-                f"10000 USDT · 안전형과 같은 손절·익절·트레일 · {PYRAMID_TEXT}"),
+    "hold": ("conservative", "hold", "안전형 + 단일진입", f"10000 USDT · {SAFE_EXITS} · {HOLD_TEXT}"),
+    "aggr_hold": ("aggressive", "hold", "공격형 + 단일진입", f"10000 USDT · {AGGR_EXITS} · {HOLD_TEXT}"),
+    "switch": ("conservative", "switch", "안전형 + 스위칭 + 단일진입", f"10000 USDT · {SAFE_EXITS} · {SWITCH_TEXT}"),
+    "pyramid": ("conservative", "pyramid", "안전형 + 스위칭 + 추가진입", f"10000 USDT · {SAFE_EXITS} · {PYRAMID_TEXT}"),
     "aggr_switch": ("aggressive", "switch", "공격형 + 스위칭 + 단일진입",
-                    f"10000 USDT · 공격형과 같은 손절·익절·트레일 · {SWITCH_TEXT}"),
+                    f"10000 USDT · {AGGR_EXITS} · {SWITCH_TEXT}"),
     "aggr_pyramid": ("aggressive", "pyramid", "공격형 + 스위칭 + 추가진입",
-                     f"10000 USDT · 공격형과 같은 손절·익절·트레일 · {PYRAMID_TEXT}"),
+                     f"10000 USDT · {AGGR_EXITS} · {PYRAMID_TEXT}"),
     "pct_mid_pyramid": ("pct_mid", "pyramid", "% 균형형 + 스위칭 + 추가진입",
-                        f"10000 USDT · 손절 −2.6% · {PCT_TEXT} · {PYRAMID_TEXT}"),
+                        f"10000 USDT · SL −2.6% · {PCT_EXITS} · {PYRAMID_TEXT}"),
     "pct_aggr_pyramid": ("pct_aggr", "pyramid", "% 공격형 + 스위칭 + 추가진입",
-                         f"10000 USDT · 손절 −3.6% · {PCT_TEXT} · {PYRAMID_TEXT}"),
+                         f"10000 USDT · SL −3.6% · {PCT_EXITS} · {PYRAMID_TEXT}"),
 }
-
 
 def kst(ms):
     return datetime.fromtimestamp(ms / 1000, KST).strftime("%Y-%m-%dT%H:%M")
