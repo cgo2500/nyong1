@@ -58,9 +58,9 @@ RULES = {
                     f"10000 USDT · {AGGR_EXITS} · {SWITCH_TEXT}"),
     "aggr_pyramid": ("aggressive", "pyramid", "공격형 + 스위칭 + 추가진입",
                      f"10000 USDT · {AGGR_EXITS} · {PYRAMID_TEXT}"),
-    "pct_mid_pyramid": ("pct_mid", "pyramid", "% 균형형 + 스위칭 + 추가진입",
+    "pct_mid_pyramid": ("pct_mid", "pyramid", "안정형 + 스위칭 + 추가진입",
                         f"10000 USDT · SL −2.6% · {PCT_EXITS} · {PYRAMID_TEXT}"),
-    "pct_aggr_pyramid": ("pct_aggr", "pyramid", "% 공격형 + 스위칭 + 추가진입",
+    "pct_aggr_pyramid": ("pct_aggr", "pyramid", "공격형 + 스위칭 + 추가진입",
                          f"10000 USDT · SL −3.6% · {PCT_EXITS} · {PYRAMID_TEXT}"),
 }
 
