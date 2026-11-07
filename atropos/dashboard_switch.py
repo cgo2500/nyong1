@@ -9,9 +9,13 @@ the new side.
 Rows use the tab's btc_atro schema, with net scaled to 10000 USDT of BTC per
 trade.
 
+The plain presets (every signal its own trade) go to btc_atro.json, the
+dataset the tab started with, and the rest to btc_atro_sw.json.
+
 Usage
   python3 atropos/dashboard_switch.py --candles okx_btc_5m.csv --out-dir DIR
-  -> DIR/btc_atro_sw.json, DIR/btc_atro_sw_status.json
+  -> DIR/btc_atro.json, DIR/btc_atro_status.json,
+     DIR/btc_atro_sw.json, DIR/btc_atro_sw_status.json
 """
 import argparse
 import json
@@ -27,7 +31,13 @@ NOTIONAL = 10000
 HOLD_TEXT = "포지션 1개 · 들고 있는 동안 오는 신호는 반대 방향까지 모두 무시"
 SWITCH_TEXT = "포지션 1개 · 반대 신호가 오면 전량 청산 후 반대 진입 · 같은 방향 신호는 무시"
 PYRAMID_TEXT = "같은 방향 신호마다 10000 USDT 추가 진입 · 반대 신호가 오면 전량 청산 후 반대 진입"
-# rule id: (preset, policy, label, text)
+# rule id: (preset, policy, label, text); the page names safe/aggr itself
+BASE_RULES = {
+    "safe": ("conservative", "independent", "안전형",
+             "10000 USDT · 손절 −1,200 · +2,200 에서 30% 익절 · 나머지 70% 최고가 −400 트레일"),
+    "aggr": ("aggressive", "independent", "공격형",
+             "10000 USDT · 손절 −2,400 · +2,600 에서 70% 익절 · 나머지 30% 최고가 −400 트레일"),
+}
 RULES = {
     "hold": ("conservative", "hold", "안전형 + 단일진입",
              f"10000 USDT · 안전형과 같은 손절·익절·트레일 · {HOLD_TEXT}"),
@@ -89,21 +99,25 @@ def main():
     idx = {t: i for i, t in enumerate(times)}
     sigs = [s for s in load_signals(a.signals, 9) if s["ts"] in idx]
     trades = [grid.Trade(s, candles, times, idx, a.max_bars) for s in sigs]
-    rows, status = [], []
-    for rule, (preset, policy, label, text) in RULES.items():
-        params = grid.PRESETS[preset]
-        rows += rows_for(rule, params, policy, trades, times, a.max_bars)
-        status.append({"rule": rule, "label": label, "text": text, "signals": len(trades),
-                       "max_open": switch.run(trades, params, policy)[1],
-                       "first_signal": trades[0].label.replace(" ", "T") if trades else "",
-                       "asof": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")})
-    for name, data in (("btc_atro_sw.json", rows), ("btc_atro_sw_status.json", status)):
-        with open(os.path.join(a.out_dir, name), "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-    for rule in RULES:
-        rs = [r for r in rows if r["rule"] == rule]
-        print(f"{rule}: {len(trades)} signals -> {len(rs)} trades, "
-              f"net {sum(r['net'] for r in rs):.2f} USDT at {NOTIONAL} USDT each")
+    asof = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
+    first = trades[0].label.replace(" ", "T") if trades else ""
+    for (rows_name, status_name), rules in ((("btc_atro.json", "btc_atro_status.json"), BASE_RULES),
+                                            (("btc_atro_sw.json", "btc_atro_sw_status.json"), RULES)):
+        rows, status = [], []
+        for rule, (preset, policy, label, text) in rules.items():
+            params = grid.PRESETS[preset]
+            rs = rows_for(rule, params, policy, trades, times, a.max_bars)
+            rows += rs
+            st = {"rule": rule, "label": label, "text": text, "signals": len(trades),
+                  "first_signal": first, "asof": asof}
+            if policy != "independent":
+                st["max_open"] = switch.run(trades, params, policy)[1]
+            status.append(st)
+            print(f"{rule}: {len(trades)} signals -> {len(rs)} trades, "
+                  f"net {sum(r['net'] for r in rs):.2f} USDT at {NOTIONAL} USDT each")
+        for name, data in ((rows_name, rows), (status_name, status)):
+            with open(os.path.join(a.out_dir, name), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
 
 
 if __name__ == "__main__":
