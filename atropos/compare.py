@@ -28,9 +28,20 @@ STRATEGIES = {
 }
 
 
-def positions(trades, params, policy):
-    """[(trade, legs)] as each position actually ends, like switch.run but keeping the legs."""
+def stopped(tr, legs, sl):
+    """True when the position ended on its stop-loss before the first target."""
+    q, b, pts, rate = legs[0]
+    return rate == grid.TAKER and abs(pts + sl) < 1e-6 and b < tr.n
+
+
+def positions(trades, params, policy, max_same=None, rest_after_stop=False):
+    """[(trade, legs)] as each position actually ends, like switch.run but keeping the legs.
+
+    max_same: skip a signal while this many positions on its side are open.
+    rest_after_stop: after a position is stopped out, skip the next signal on its side.
+    """
     done, open_pos = [], []
+    resting = {"long": False, "short": False}
     for t in trades:
         still = []
         for ptr, plegs in open_pos:
@@ -39,15 +50,25 @@ def positions(trades, params, policy):
                 still.append((ptr, plegs, k))
             else:
                 done.append((ptr, plegs))
+                if rest_after_stop and stopped(ptr, plegs, params[0]):
+                    resting[ptr.side] = True
         open_pos = [(ptr, plegs) for ptr, plegs, _ in still]
+        if resting[t.side]:
+            resting[t.side] = False
+            continue
+        if max_same and sum(ptr.side == t.side for ptr, _, _ in still) >= max_same:
+            continue
         if policy != "independent" and still:
             same = still[0][0].side == t.side
             if policy == "hold" or (policy == "switch" and same):
                 continue
             if not same:
                 for ptr, plegs, k in still:
-                    done.append((ptr, [(q, b, p, r) if b <= k else (q, k, ptr.close[k], grid.TAKER)
-                                       for q, b, p, r in plegs]))
+                    cut = [(q, b, p, r) if b <= k else (q, k, ptr.close[k], grid.TAKER)
+                           for q, b, p, r in plegs]
+                    done.append((ptr, cut))
+                    if rest_after_stop and stopped(ptr, cut, params[0]):
+                        resting[ptr.side] = True
                 open_pos = []
         open_pos.append((t, grid.legs(t, *params)))
     return done + open_pos
