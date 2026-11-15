@@ -6,6 +6,8 @@ the new side.
   hold     one position at a time; every signal while holding is ignored
   switch   one position at a time; a same-side signal while holding is ignored
   pyramid  a same-side signal adds another 10000 USDT position
+The safeguard rules add compare.positions() options: at most two positions on
+a side (A), and skipping a side's next signal after a stop-out there (B).
 Rows use the tab's btc_atro schema, with net scaled to 10000 USDT of BTC per
 trade.
 
@@ -25,7 +27,6 @@ import os
 from datetime import datetime
 
 import grid
-import switch
 from backtest import SIGNAL_FILES, load_candles_csv, load_signals
 from telegram_collector import KST
 
@@ -33,6 +34,9 @@ NOTIONAL = 10000
 HOLD_TEXT = "포지션 1개 · 들고 있는 동안 오는 신호는 반대 방향까지 모두 무시"
 SWITCH_TEXT = "포지션 1개 · 반대 신호가 오면 전량 청산 후 반대 진입 · 같은 방향 신호는 무시"
 PYRAMID_TEXT = "같은 방향 신호마다 10000 USDT 추가 진입 · 반대 신호가 오면 전량 청산 후 반대 진입"
+REST_TEXT = "손절 나면 그 방향 다음 신호 1건 건너뜀"
+CAP_TEXT = "같은 방향 최대 2개까지만 보유"
+REST = {"rest_after_stop": True}
 # the exits each card spells out
 SAFE_EXITS = "SL −1,200 · TP +2,200 에서 30% 익절 · Trail 나머지 70% 최고가 −400"
 AGGR_EXITS = "SL −2,400 · TP +2,600 에서 70% 익절 · Trail 나머지 30% 최고가 −400"
@@ -62,22 +66,34 @@ RULES = {
                         f"10000 USDT · SL −2.6% · {PCT_EXITS} · {PYRAMID_TEXT}"),
     "pct_aggr_pyramid": ("pct_aggr", "pyramid", "공격형 + 스위칭 + 추가진입",
                          f"10000 USDT · SL −3.6% · {PCT_EXITS} · {PYRAMID_TEXT}"),
+    # safeguards (A: CAP_TEXT, B: REST_TEXT)
+    "safe_pyr_rest": ("conservative", "pyramid", "안전형 + 스위칭 + 추가진입 + 손절후쉬기",
+                      f"10000 USDT · {SAFE_EXITS} · {PYRAMID_TEXT} · {REST_TEXT}", REST),
+    "aggr_pyr_rest": ("aggressive", "pyramid", "공격형 + 스위칭 + 추가진입 + 손절후쉬기",
+                      f"10000 USDT · {AGGR_EXITS} · {PYRAMID_TEXT} · {REST_TEXT}", REST),
+    "pct_mid_pyr_rest": ("pct_mid", "pyramid", "% 안정형 + 스위칭 + 추가진입 + 손절후쉬기",
+                         f"10000 USDT · SL −2.6% · {PCT_EXITS} · {PYRAMID_TEXT} · {REST_TEXT}", REST),
+    "pct_aggr_pyr_rest": ("pct_aggr", "pyramid", "% 공격형 + 스위칭 + 추가진입 + 손절후쉬기",
+                          f"10000 USDT · SL −3.6% · {PCT_EXITS} · {PYRAMID_TEXT} · {REST_TEXT}", REST),
+    "pct_aggr_pyr_cap_rest": ("pct_aggr", "pyramid", "% 공격형 + 스위칭 + 추가진입 + 최대2개 + 손절후쉬기",
+                              f"10000 USDT · SL −3.6% · {PCT_EXITS} · {PYRAMID_TEXT} · {CAP_TEXT} · {REST_TEXT}",
+                              {"max_same": 2, "rest_after_stop": True}),
 }
 
 def kst(ms):
     return datetime.fromtimestamp(ms / 1000, KST).strftime("%Y-%m-%dT%H:%M")
 
 
-def rows_for(rule, params, policy, trades, times, max_bars):
+def rows_for(rule, params, policy, trades, times, max_bars, opts):
+    import compare  # compare -> this module
     out = []
-    for tr, net_qty, how in switch.run(trades, params, policy)[0]:
-        legs = grid.legs(tr, *params)
-        tp1_hit = legs[0][3] == grid.MAKER
+    for tr, legs in compare.positions(trades, params, policy, **opts):
+        orig = grid.legs(tr, *params)
+        tp1_hit = orig[0][3] == grid.MAKER
         end = max(b for _, b, _, _ in legs)
-        if how == "switched":
-            k = next(t.i for t in trades if t.i > tr.i and t.side != tr.side) - tr.i - 1
-            tp1_hit = tp1_hit and legs[0][1] <= k
-            result, closed, exit_bar = ("TP1 + 반대 신호" if tp1_hit else "반대 신호 청산"), True, k
+        if legs != orig:  # closed early by an opposite signal at bar `end`
+            tp1_hit = tp1_hit and orig[0][1] <= end
+            result, closed, exit_bar = ("TP1 + 반대 신호" if tp1_hit else "반대 신호 청산"), True, end
         elif end >= tr.n:
             if tr.n < max_bars:
                 result, closed, exit_bar = "보유 중", False, None
@@ -86,7 +102,7 @@ def rows_for(rule, params, policy, trades, times, max_bars):
         else:
             result, closed, exit_bar = ("TP1 + 트레일" if tp1_hit else "손절"), True, end
         price = getattr(tr, "price", tr.entry)  # percent trades are rescaled to entry 10000
-        net = net_qty / grid.QTY * NOTIONAL / tr.entry
+        net = sum(grid.leg(tr, q, p, r) for q, _, p, r in legs if q) / grid.QTY * NOTIONAL / tr.entry
         out.append({
             "rule": rule, "trade_id": f"{rule}_{tr.label}_{tr.side}",
             "signal_at": tr.label.replace(" ", "T"), "side": tr.side, "entry": price,
@@ -117,16 +133,18 @@ def main():
     for (rows_name, status_name), rules in ((("btc_atro.json", "btc_atro_status.json"), BASE_RULES),
                                             (("btc_atro_sw.json", "btc_atro_sw_status.json"), RULES)):
         rows, status = [], []
-        for rule, (preset, policy, label, text) in rules.items():
+        for rule, (preset, policy, label, text, *opts) in rules.items():
+            opts = opts[0] if opts else {}
             pct = preset in PCT_PRESETS
             params = PCT_PRESETS[preset] if pct else grid.PRESETS[preset]
             ts = pct_trades if pct else trades
-            rs = rows_for(rule, params, policy, ts, times, a.max_bars)
+            rs = rows_for(rule, params, policy, ts, times, a.max_bars, opts)
             rows += rs
             st = {"rule": rule, "label": label, "text": text, "signals": len(trades),
                   "first_signal": first, "asof": asof}
             if policy != "independent":
-                st["max_open"] = switch.run(ts, params, policy)[1]
+                import compare
+                st["max_open"] = compare.max_open(compare.positions(ts, params, policy, **opts))
             status.append(st)
             print(f"{rule}: {len(trades)} signals -> {len(rs)} trades, "
                   f"net {sum(r['net'] for r in rs):.2f} USDT at {NOTIONAL} USDT each")
