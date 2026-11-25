@@ -8,6 +8,9 @@ of one signal, and writes
   server_signals.csv     time_kst,side,note,msg_kst,sources,price  (backtest format)
   server_btc_raw.jsonl   the BTC log lines as they were, for re-parsing later
 
+A message that arrived late lands on the wrong candle; signal_fixes.csv maps
+such a candle (and side) to the one the Zetro app lists, checked by price.
+
 Usage
   python3 atropos/import_server_log.py --src /opt/pantera_gate_bot/atropos_signals.jsonl
 """
@@ -50,7 +53,14 @@ def main():
                     help="minutes between the floored message time and the signal candle")
     ap.add_argument("--merge-min", type=int, default=10,
                     help="same-side messages this close together are one signal")
+    ap.add_argument("--fixes", default=os.path.join(HERE, "signal_fixes.csv"))
     a = ap.parse_args()
+
+    fixes = {}
+    if os.path.exists(a.fixes):
+        with open(a.fixes, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                fixes[(row["server_time_kst"], row["side"])] = row["fixed_time_kst"]
 
     raw, sigs = [], []
     with open(a.src, encoding="utf-8") as f:
@@ -79,7 +89,9 @@ def main():
         w = csv.writer(f)
         w.writerow(["time_kst", "side", "note", "msg_kst", "sources", "price"])
         for m in merged:
-            w.writerow([candle_time(m["dt"], a.candle_offset).strftime("%Y-%m-%d %H:%M"), m["side"], "",
+            candle = candle_time(m["dt"], a.candle_offset).strftime("%Y-%m-%d %H:%M")
+            fixed = fixes.get((candle, m["side"]))
+            w.writerow([fixed or candle, m["side"], f"수정: {candle} → {fixed}" if fixed else "",
                         m["dt"].astimezone(KST).strftime("%Y-%m-%d %H:%M:%S"), "+".join(sorted(m["sources"])), m["price"]])
     with open(a.raw_out, "w", encoding="utf-8") as f:
         f.write("\n".join(raw) + ("\n" if raw else ""))
